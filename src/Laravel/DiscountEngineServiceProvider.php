@@ -13,6 +13,8 @@ use SolutionsTI\DiscountEngine\Core\Engine\ConditionMatcher;
 use SolutionsTI\DiscountEngine\Core\Engine\DiscountEngine;
 use SolutionsTI\DiscountEngine\Core\Registry\ActionRegistry;
 use SolutionsTI\DiscountEngine\Core\Registry\ConditionRegistry;
+use SolutionsTI\DiscountEngine\Laravel\Console\RaceTestCommand;
+use SolutionsTI\DiscountEngine\Laravel\Console\RaceWorkerCommand;
 use SolutionsTI\DiscountEngine\Laravel\Models\DiscountRule;
 use SolutionsTI\DiscountEngine\Laravel\Repositories\DatabaseUsageTracker;
 use SolutionsTI\DiscountEngine\Laravel\Repositories\EloquentRuleRepository;
@@ -88,6 +90,13 @@ final class DiscountEngineServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(__DIR__ . '/../../database/migrations');
 
         if ($this->app->runningInConsole()) {
+            // Ferramenta de diagnostico: valida o lock sob concorrencia real.
+            // Cria e apaga dados de teste, entao nao deve rodar em producao.
+            $this->commands([
+                RaceTestCommand::class,
+                RaceWorkerCommand::class,
+            ]);
+
             $this->publishes([
                 __DIR__ . '/../../config/discount-engine.php' => config_path('discount-engine.php'),
             ], 'discount-engine-config');

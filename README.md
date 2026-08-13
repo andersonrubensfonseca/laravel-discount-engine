@@ -252,3 +252,26 @@ de usos e a segunda linha de defesa contra retry duplicado.
 - [ ] `BuyXGetY` e desconto escalonado por faixa
 - [ ] Endpoint HTTP pronto para o checkout
 - [ ] CI com matriz Laravel 8.75 / 13
+
+## Teste de concorrencia
+
+O PHPUnit e single-threaded: os testes de integracao verificam a logica
+sequencial, mas nao provam que o `lockForUpdate` segura sob disputa real.
+
+Este comando dispara N processos PHP independentes — cada um com sua propria
+conexao — todos tentando consumir o mesmo cupom no mesmo instante:
+
+```bash
+php artisan discount:race-test --workers=20 --limit=1
+```
+
+Cada worker calcula o carrinho ANTES do portao de largada e reserva DEPOIS.
+Isso reproduz o cenario real: todo mundo viu o desconto na tela enquanto
+havia saldo, e so entao apertou "finalizar".
+
+Rodar contra **MySQL/InnoDB**. O SQLite trava o arquivo inteiro e o resultado
+nao diz nada sobre producao.
+
+Opcoes: `--workers`, `--limit`, `--code`, `--delay`.
+
+O comando cria e apaga dados de teste — nao rodar em producao.

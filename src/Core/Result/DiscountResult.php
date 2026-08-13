@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SolutionsTI\DiscountEngine\Core\Result;
 
+use SolutionsTI\DiscountEngine\Core\Allocation\DiscountAllocation;
 use SolutionsTI\DiscountEngine\Core\Money\Money;
 
 /**
@@ -12,38 +13,49 @@ use SolutionsTI\DiscountEngine\Core\Money\Money;
  *
  * Nunca recalcule o desconto de um pedido antigo a partir da regra atual:
  * editar uma regra reescreveria o historico financeiro.
+ *
+ * Desde a v0.3 o rateio por item e EXATO, nao proporcional: vem da
+ * alocacao que cada acao produziu. E o que permite emitir nota fiscal com
+ * desconto discriminado por item sem divergencia.
  */
 final class DiscountResult
 {
     /**
-     * @param  array<int,AppliedDiscount>       $applied
-     * @param  array<int,RejectedRule>          $rejected
-     * @param  array<array-key,Money>           $itemAllocations  desconto rateado por item
+     * @param  array<int,AppliedDiscount>  $applied
+     * @param  array<int,RejectedRule>     $rejected
      */
     public function __construct(
         public readonly Money $subtotal,
         public readonly Money $shippingCost,
-        public readonly Money $itemsDiscount,
-        public readonly Money $shippingDiscount,
+        public readonly DiscountAllocation $allocation,
         public readonly array $applied = [],
         public readonly array $rejected = [],
-        public readonly array $itemAllocations = [],
     ) {
+    }
+
+    public function itemsDiscount(): Money
+    {
+        return $this->allocation->itemsTotal();
+    }
+
+    public function shippingDiscount(): Money
+    {
+        return $this->allocation->shippingTotal();
     }
 
     public function totalDiscount(): Money
     {
-        return $this->itemsDiscount->add($this->shippingDiscount);
+        return $this->allocation->total();
     }
 
     public function finalSubtotal(): Money
     {
-        return $this->subtotal->subtract($this->itemsDiscount);
+        return $this->subtotal->subtract($this->itemsDiscount());
     }
 
     public function finalShipping(): Money
     {
-        return $this->shippingCost->subtract($this->shippingDiscount);
+        return $this->shippingCost->subtract($this->shippingDiscount());
     }
 
     public function finalTotal(): Money
@@ -56,19 +68,41 @@ final class DiscountResult
         return $this->totalDiscount()->isPositive();
     }
 
+    /** @return array<array-key,Money> itemId => desconto exato */
+    public function itemAllocations(): array
+    {
+        return $this->allocation->byItem();
+    }
+
+    /** @return array<string,Money> "itemId::indice" => desconto exato */
+    public function componentAllocations(): array
+    {
+        return $this->allocation->byComponent();
+    }
+
+    /** @return array<string,Money> ex.: ['base' => .., 'print' => ..] */
+    public function discountByComponentType(): array
+    {
+        return $this->allocation->byComponentType();
+    }
+
     /** @return array<string,mixed> */
     public function toArray(): array
     {
         return [
             'subtotal_cents' => $this->subtotal->cents,
             'shipping_cents' => $this->shippingCost->cents,
-            'items_discount_cents' => $this->itemsDiscount->cents,
-            'shipping_discount_cents' => $this->shippingDiscount->cents,
+            'items_discount_cents' => $this->itemsDiscount()->cents,
+            'shipping_discount_cents' => $this->shippingDiscount()->cents,
             'total_discount_cents' => $this->totalDiscount()->cents,
             'final_total_cents' => $this->finalTotal()->cents,
             'applied' => array_map(static fn (AppliedDiscount $d): array => $d->toArray(), $this->applied),
             'rejected' => array_map(static fn (RejectedRule $r): array => $r->toArray(), $this->rejected),
-            'item_allocations' => array_map(static fn (Money $m): int => $m->cents, $this->itemAllocations),
+            'allocation' => $this->allocation->toArray(),
+            'item_allocations' => array_map(
+                static fn (Money $m): int => $m->cents,
+                $this->itemAllocations(),
+            ),
         ];
     }
 }

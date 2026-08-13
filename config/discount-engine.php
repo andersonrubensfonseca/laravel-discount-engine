@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use SolutionsTI\DiscountEngine\Core\Actions\BuyXGetYDiscount;
+use SolutionsTI\DiscountEngine\Core\Actions\ComponentUnitPriceDiscount;
 use SolutionsTI\DiscountEngine\Core\Actions\FixedAmountDiscount;
 use SolutionsTI\DiscountEngine\Core\Actions\FreeShippingDiscount;
 use SolutionsTI\DiscountEngine\Core\Actions\PercentageDiscount;
+use SolutionsTI\DiscountEngine\Core\Actions\TieredDiscount;
 use SolutionsTI\DiscountEngine\Core\Conditions\CartSubtotalCondition;
 use SolutionsTI\DiscountEngine\Core\Conditions\CategoryQuantityCondition;
 use SolutionsTI\DiscountEngine\Core\Conditions\CustomerGroupCondition;
@@ -79,6 +82,9 @@ return [
         PercentageDiscount::class,
         FixedAmountDiscount::class,
         FreeShippingDiscount::class,
+        BuyXGetYDiscount::class,
+        TieredDiscount::class,
+        ComponentUnitPriceDiscount::class,
     ],
 
 ];

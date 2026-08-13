@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace SolutionsTI\DiscountEngine\Core\Engine;
 
 use DateTimeImmutable;
+use SolutionsTI\DiscountEngine\Core\Allocation\AllocationEntry;
+use SolutionsTI\DiscountEngine\Core\Allocation\DiscountAllocation;
+use SolutionsTI\DiscountEngine\Core\Allocation\DiscountScope;
+use SolutionsTI\DiscountEngine\Core\Allocation\ScopedComponent;
 use SolutionsTI\DiscountEngine\Core\Context\CartContext;
-use SolutionsTI\DiscountEngine\Core\Context\CartItem;
 use SolutionsTI\DiscountEngine\Core\Contracts\RuleRepository;
 use SolutionsTI\DiscountEngine\Core\Contracts\UsageTracker;
 use SolutionsTI\DiscountEngine\Core\Enums\ActionTarget;
@@ -17,15 +20,19 @@ use SolutionsTI\DiscountEngine\Core\Registry\ActionRegistry;
 use SolutionsTI\DiscountEngine\Core\Result\AppliedDiscount;
 use SolutionsTI\DiscountEngine\Core\Result\DiscountResult;
 use SolutionsTI\DiscountEngine\Core\Result\RejectedRule;
+use SolutionsTI\DiscountEngine\Core\Rule\ActionDefinition;
 use SolutionsTI\DiscountEngine\Core\Rule\Rule;
 
 /**
  * O coracao do pacote.
  *
- * Fluxo: reune candidatas -> ordena por prioridade -> filtra -> aplica ->
- * respeita exclusividade -> aplica teto global -> rateia por item.
+ * Fluxo: reune candidatas -> ordena por prioridade -> filtra -> monta o
+ * escopo de cada acao -> aplica -> respeita exclusividade -> teto global.
  *
  * Zero IO. Zero framework. Recebe CartContext, devolve DiscountResult.
+ *
+ * Desde a v0.3 o motor acumula uma DiscountAllocation em vez de somas
+ * soltas: cada centavo sabe de qual componente de qual item ele saiu.
  */
 final class DiscountEngine
 {
@@ -44,10 +51,7 @@ final class DiscountEngine
         $now ??= new DateTimeImmutable();
 
         $subtotal = $cart->subtotal();
-        $shipping = $cart->shippingCost;
-
-        $itemsDiscount = Money::zero();
-        $shippingDiscount = Money::zero();
+        $accumulated = DiscountAllocation::empty();
 
         /** @var array<int,AppliedDiscount> $applied */
         $applied = [];
@@ -74,53 +78,41 @@ final class DiscountEngine
                 continue;
             }
 
-            $ruleDiscount = Money::zero();
+            $ruleAllocation = DiscountAllocation::empty();
 
             foreach ($rule->actions as $action) {
-                $handler = $this->actions->get($action->type);
+                $scope = $this->buildScope($rule, $action, $cart, $accumulated->merge($ruleAllocation));
 
-                $base = $this->resolveBase(
-                    $rule->calculationBase,
-                    $action->target,
-                    $subtotal,
-                    $shipping,
-                    $itemsDiscount,
-                    $shippingDiscount,
-                );
-
-                if (! $base->isPositive()) {
+                if ($scope->isEmpty()) {
                     continue;
                 }
 
-                $amount = $handler->calculate($action, $cart, $base);
+                $result = $this->actions->get($action->type)->calculate($action, $cart, $scope);
 
-                if (! $amount->isPositive()) {
+                if ($result->isEmpty()) {
                     continue;
                 }
 
-                if ($action->target === ActionTarget::Shipping) {
-                    $shippingDiscount = $shippingDiscount->add($amount);
-                } else {
-                    $itemsDiscount = $itemsDiscount->add($amount);
-                }
-
-                $ruleDiscount = $ruleDiscount->add($amount);
+                $ruleAllocation = $ruleAllocation->merge($result);
 
                 $applied[] = new AppliedDiscount(
                     ruleId: $rule->id,
                     ruleName: $rule->name,
                     actionType: $action->type,
                     target: $action->target,
-                    amount: $amount,
+                    amount: $result->total(),
                     couponCode: $rule->couponCode,
+                    allocation: $result,
                 );
             }
 
-            if ($ruleDiscount->isZero()) {
+            if ($ruleAllocation->isEmpty()) {
                 $rejected[] = new RejectedRule($rule->id, $rule->name, RejectionReason::NoDiscountValue);
 
                 continue;
             }
+
+            $accumulated = $accumulated->merge($ruleAllocation);
 
             if ($rule->exclusivityGroup !== null) {
                 $usedExclusivityGroups[] = $rule->exclusivityGroup;
@@ -135,19 +127,14 @@ final class DiscountEngine
             }
         }
 
-        // Redes de seguranca: nunca descontar mais do que existe.
-        $itemsDiscount = $itemsDiscount->clampTo($subtotal);
-        $shippingDiscount = $shippingDiscount->clampTo($shipping);
-        $itemsDiscount = $this->applyGlobalCap($itemsDiscount, $subtotal);
+        $accumulated = $this->applyGlobalCap($accumulated, $subtotal);
 
         return new DiscountResult(
             subtotal: $subtotal,
-            shippingCost: $shipping,
-            itemsDiscount: $itemsDiscount,
-            shippingDiscount: $shippingDiscount,
+            shippingCost: $cart->shippingCost,
+            allocation: $accumulated,
             applied: $applied,
             rejected: $rejected,
-            itemAllocations: $this->allocateToItems($cart, $itemsDiscount),
         );
     }
 
@@ -162,6 +149,57 @@ final class DiscountEngine
         usort($candidates, static fn (Rule $a, Rule $b): int => $a->priority <=> $b->priority);
 
         return $candidates;
+    }
+
+    /**
+     * Monta o recorte sobre o qual a acao vai agir.
+     *
+     * Aqui mora a diferenca entre 10%+10% = 20% e 10%+10% = 19%: com base
+     * 'current' o saldo ja concedido e descontado do disponivel; com
+     * 'original' o escopo ignora o que veio antes.
+     */
+    private function buildScope(
+        Rule $rule,
+        ActionDefinition $action,
+        CartContext $cart,
+        DiscountAllocation $used,
+    ): DiscountScope {
+        $isCurrent = $rule->calculationBase === CalculationBase::Current;
+
+        if ($action->target->isShipping()) {
+            $spent = $isCurrent ? $used->shippingTotal() : Money::zero();
+            $available = $cart->shippingCost->subtract($spent)->atLeastZero();
+
+            return $available->isPositive()
+                ? DiscountScope::of([ScopedComponent::forShipping($available, $cart->shippingCost)])
+                : DiscountScope::empty();
+        }
+
+        return DiscountScope::forCart(
+            cart: $cart,
+            componentTypes: $this->componentTypes($action),
+            alreadyDiscounted: $isCurrent ? $used->byComponent() : [],
+        );
+    }
+
+    /**
+     * O filtro de componentes so vale para o alvo Components. Nos demais
+     * alvos o desconto incide no item inteiro, como sempre incidiu.
+     *
+     * @return array<int,string>
+     */
+    private function componentTypes(ActionDefinition $action): array
+    {
+        if ($action->target !== ActionTarget::Components) {
+            return [];
+        }
+
+        $types = $action->meta('component_types', []);
+
+        return array_values(array_filter(
+            is_array($types) ? $types : [$types],
+            static fn ($type): bool => is_string($type) && $type !== '',
+        ));
     }
 
     /** @param  array<int,string>  $usedExclusivityGroups */
@@ -204,67 +242,31 @@ final class DiscountEngine
     }
 
     /**
-     * Aqui mora a diferenca entre 10%+10% = 20% e 10%+10% = 19%.
-     * A regra declara qual comportamento quer; o motor nao adivinha.
+     * O teto incide sobre os itens; frete tem regra propria e fica de fora,
+     * senao um frete caro consumiria a cota de desconto dos produtos.
      */
-    private function resolveBase(
-        CalculationBase $calculationBase,
-        ActionTarget $target,
-        Money $subtotal,
-        Money $shipping,
-        Money $itemsDiscount,
-        Money $shippingDiscount,
-    ): Money {
-        if ($target === ActionTarget::Shipping) {
-            return $calculationBase === CalculationBase::Original
-                ? $shipping
-                : $shipping->subtract($shippingDiscount)->atLeastZero();
-        }
-
-        return $calculationBase === CalculationBase::Original
-            ? $subtotal
-            : $subtotal->subtract($itemsDiscount)->atLeastZero();
-    }
-
-    private function applyGlobalCap(Money $discount, Money $subtotal): Money
+    private function applyGlobalCap(DiscountAllocation $allocation, Money $subtotal): DiscountAllocation
     {
         if ($this->globalCapPercentage === null) {
-            return $discount;
+            return $allocation;
         }
 
-        return $discount->clampTo($subtotal->percentage($this->globalCapPercentage));
-    }
+        $ceiling = $subtotal->percentage($this->globalCapPercentage);
 
-    /**
-     * Rateia o desconto de itens proporcionalmente ao subtotal de cada linha.
-     * Usa o metodo do maior resto: a soma das fatias bate exatamente com o total.
-     *
-     * @return array<array-key,Money>
-     */
-    private function allocateToItems(CartContext $cart, Money $itemsDiscount): array
-    {
-        if ($itemsDiscount->isZero() || $cart->items === []) {
-            return [];
+        $items = DiscountAllocation::of(array_values(array_filter(
+            $allocation->entries,
+            static fn (AllocationEntry $entry): bool => ! $entry->isShipping(),
+        )));
+
+        if (! $items->total()->greaterThan($ceiling)) {
+            return $allocation;
         }
 
-        $weights = [];
+        $shipping = DiscountAllocation::of(array_values(array_filter(
+            $allocation->entries,
+            static fn (AllocationEntry $entry): bool => $entry->isShipping(),
+        )));
 
-        foreach ($cart->items as $index => $item) {
-            $weights[$index] = $item->subtotal()->cents;
-        }
-
-        if (array_sum($weights) <= 0) {
-            return [];
-        }
-
-        $shares = $itemsDiscount->allocate($weights);
-        $allocations = [];
-
-        foreach ($cart->items as $index => $item) {
-            /** @var CartItem $item */
-            $allocations[$item->id] = $shares[$index];
-        }
-
-        return $allocations;
+        return $items->clampTo($ceiling)->merge($shipping);
     }
 }

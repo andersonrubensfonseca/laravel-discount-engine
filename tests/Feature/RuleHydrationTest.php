@@ -38,7 +38,7 @@ final class RuleHydrationTest extends TestCase
 
         $resultado = $this->manager()->calculate($this->carrinho(25000));
 
-        self::assertSame(2500, $resultado->itemsDiscount->cents);
+        self::assertSame(2500, $resultado->itemsDiscount()->cents);
         self::assertSame(22500, $resultado->finalTotal()->cents);
     }
 
@@ -79,7 +79,7 @@ final class RuleHydrationTest extends TestCase
             completedOrders: 30,
         ));
 
-        self::assertSame(4000, $this->manager()->calculate($vip)->itemsDiscount->cents);
+        self::assertSame(4000, $this->manager()->calculate($vip)->itemsDiscount()->cents);
         self::assertFalse($this->manager()->calculate($comum)->hasDiscount());
     }
 
@@ -96,7 +96,7 @@ final class RuleHydrationTest extends TestCase
 
         $resultado = $this->manager()->calculate($this->carrinho(100000));
 
-        self::assertSame(3000, $resultado->itemsDiscount->cents);
+        self::assertSame(3000, $resultado->itemsDiscount()->cents);
     }
 
     public function test_regra_inativa_nao_e_sequer_candidata(): void
@@ -149,7 +149,7 @@ final class RuleHydrationTest extends TestCase
         $resultado = $this->manager()->calculate($this->carrinho(10000));
 
         self::assertSame('Primeira', $resultado->applied[0]->ruleName);
-        self::assertSame(7500, $resultado->itemsDiscount->cents);
+        self::assertSame(7500, $resultado->itemsDiscount()->cents);
     }
 
     public function test_desconto_de_frete_nao_encosta_no_subtotal(): void
@@ -163,8 +163,8 @@ final class RuleHydrationTest extends TestCase
 
         $resultado = $this->manager()->calculate($this->carrinho(10000, frete: 2500));
 
-        self::assertSame(0, $resultado->itemsDiscount->cents);
-        self::assertSame(2500, $resultado->shippingDiscount->cents);
+        self::assertSame(0, $resultado->itemsDiscount()->cents);
+        self::assertSame(2500, $resultado->shippingDiscount()->cents);
         self::assertSame(10000, $resultado->finalTotal()->cents);
     }
 

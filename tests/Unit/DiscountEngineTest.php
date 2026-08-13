@@ -48,7 +48,7 @@ final class DiscountEngineTest extends TestCase
 
         $resultado = $this->motor([$regra])->evaluate($this->carrinho(subtotalCentavos: 25000));
 
-        self::assertSame(2500, $resultado->itemsDiscount->cents);
+        self::assertSame(2500, $resultado->itemsDiscount()->cents);
         self::assertSame(22500, $resultado->finalTotal()->cents);
         self::assertCount(1, $resultado->applied);
     }
@@ -89,7 +89,7 @@ final class DiscountEngineTest extends TestCase
             $this->carrinho(subtotalCentavos: 30000, cupons: ['bemvindo']),
         );
 
-        self::assertSame(5000, $comCupom->itemsDiscount->cents);
+        self::assertSame(5000, $comCupom->itemsDiscount()->cents);
         self::assertSame('BEMVINDO', $comCupom->applied[0]->couponCode);
     }
 
@@ -111,8 +111,8 @@ final class DiscountEngineTest extends TestCase
         $corrente = $this->motor($fabricar(CalculationBase::Current))
             ->evaluate($this->carrinho(subtotalCentavos: 10000));
 
-        self::assertSame(2000, $original->itemsDiscount->cents);
-        self::assertSame(1900, $corrente->itemsDiscount->cents);
+        self::assertSame(2000, $original->itemsDiscount()->cents);
+        self::assertSame(1900, $corrente->itemsDiscount()->cents);
     }
 
     public function test_regra_exclusiva_bloqueia_as_seguintes(): void
@@ -130,7 +130,7 @@ final class DiscountEngineTest extends TestCase
         $resultado = $this->motor([$exclusiva, $acumulavel])
             ->evaluate($this->carrinho(subtotalCentavos: 10000));
 
-        self::assertSame(1500, $resultado->itemsDiscount->cents);
+        self::assertSame(1500, $resultado->itemsDiscount()->cents);
         self::assertCount(1, $resultado->applied);
         self::assertSame(RejectionReason::ExclusivityConflict, $resultado->rejected[0]->reason);
     }
@@ -143,7 +143,7 @@ final class DiscountEngineTest extends TestCase
         $resultado = $this->motor([$freteA, $freteB])
             ->evaluate($this->carrinho(subtotalCentavos: 10000, freteCentavos: 3000));
 
-        self::assertSame(3000, $resultado->shippingDiscount->cents);
+        self::assertSame(3000, $resultado->shippingDiscount()->cents);
         self::assertSame(0, $resultado->finalShipping()->cents);
         self::assertCount(1, $resultado->applied);
     }
@@ -171,7 +171,7 @@ final class DiscountEngineTest extends TestCase
         $resultado = $this->motor($regras, tetoGlobal: 40.0)
             ->evaluate($this->carrinho(subtotalCentavos: 10000));
 
-        self::assertSame(4000, $resultado->itemsDiscount->cents);
+        self::assertSame(4000, $resultado->itemsDiscount()->cents);
     }
 
     public function test_desconto_nunca_deixa_o_carrinho_negativo(): void
@@ -186,7 +186,7 @@ final class DiscountEngineTest extends TestCase
 
         $resultado = $this->motor([$regra])->evaluate($this->carrinho(subtotalCentavos: 5000));
 
-        self::assertSame(5000, $resultado->itemsDiscount->cents);
+        self::assertSame(5000, $resultado->itemsDiscount()->cents);
         self::assertSame(0, $resultado->finalSubtotal()->cents);
         self::assertFalse($resultado->finalTotal()->isNegative());
     }
@@ -207,11 +207,11 @@ final class DiscountEngineTest extends TestCase
 
         $soma = array_sum(array_map(
             static fn (Money $m): int => $m->cents,
-            $resultado->itemAllocations,
+            $resultado->itemAllocations(),
         ));
 
-        self::assertSame($resultado->itemsDiscount->cents, $soma);
-        self::assertArrayHasKey('A', $resultado->itemAllocations);
+        self::assertSame($resultado->itemsDiscount()->cents, $soma);
+        self::assertArrayHasKey('A', $resultado->itemAllocations());
     }
 
     public function test_condicoes_em_grupo_or_bastam_uma_verdadeira(): void

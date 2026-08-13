@@ -38,13 +38,13 @@ final class CacheInvalidationTest extends TestCase
         ]);
 
         // Primeira chamada popula o cache.
-        self::assertSame(1000, $this->manager()->calculate($this->carrinho())->itemsDiscount->cents);
+        self::assertSame(1000, $this->manager()->calculate($this->carrinho())->itemsDiscount()->cents);
 
         $regra->update([
             'actions' => [['type' => 'percentage', 'value' => 25, 'target' => 'cart']],
         ]);
 
-        self::assertSame(2500, $this->manager()->calculate($this->carrinho())->itemsDiscount->cents);
+        self::assertSame(2500, $this->manager()->calculate($this->carrinho())->itemsDiscount()->cents);
     }
 
     public function test_criar_uma_regra_nova_invalida_o_cache(): void
@@ -58,7 +58,7 @@ final class CacheInvalidationTest extends TestCase
             'actions' => [['type' => 'percentage', 'value' => 15, 'target' => 'cart']],
         ]);
 
-        self::assertSame(1500, $this->manager()->calculate($this->carrinho())->itemsDiscount->cents);
+        self::assertSame(1500, $this->manager()->calculate($this->carrinho())->itemsDiscount()->cents);
     }
 
     public function test_apagar_uma_regra_invalida_o_cache(): void

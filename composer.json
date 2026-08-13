@@ -1,7 +1,15 @@
 {
     "name": "solutionsti/laravel-discount-engine",
     "description": "Motor de descontos orientado a regras para carrinhos: cupons, regras automaticas, condicoes compostas e acoes combinaveis.",
-    "keywords": ["laravel", "discount", "coupon", "promotion", "cart", "rules-engine", "ecommerce"],
+    "keywords": [
+        "laravel",
+        "discount",
+        "coupon",
+        "promotion",
+        "cart",
+        "rules-engine",
+        "ecommerce"
+    ],
     "license": "MIT",
     "authors": [
         {
@@ -10,13 +18,13 @@
         }
     ],
     "require": {
-        "php": "^8.1"
+        "php": "^8.1",
+        "illuminate/database": "^8.75 || ^13.0",
+        "illuminate/support": "^8.75 || ^13.0"
     },
     "require-dev": {
+        "orchestra/testbench": "^6.24 || ^11.0",
         "phpunit/phpunit": "^9.6 || ^10.5"
-    },
-    "suggest": {
-        "illuminate/support": "Necessario apenas para a camada de integracao Laravel (^8.75 || ^13.0)."
     },
     "autoload": {
         "psr-4": {
@@ -32,5 +40,15 @@
         "sort-packages": true
     },
     "minimum-stability": "dev",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SolutionsTI\\DiscountEngine\\Laravel\\DiscountEngineServiceProvider"
+            ],
+            "aliases": {
+                "Discounts": "SolutionsTI\\DiscountEngine\\Laravel\\Facades\\Discounts"
+            }
+        }
+    }
 }

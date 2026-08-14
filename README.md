@@ -1,134 +1,56 @@
 # laravel-discount-engine
 
-> **Vai cadastrar descontos, nao programar?** O manual de uso esta em
-> [`docs/MANUAL.md`](docs/MANUAL.md) — escrito para o time comercial, com
-> receitas prontas e um roteiro de familiarizacao.
+Motor de descontos orientado a regras para carrinhos. Cupons, regras
+automaticas, condicoes compostas, produtos com preco decomposto e alocacao
+exata por item.
 
-Motor de descontos orientado a regras para carrinhos. Cupons, regras automaticas,
-condicoes compostas e acoes combinaveis — cadastraveis por gente nao tecnica.
+Compativel com Laravel 8.75+ e 13. PHP 8.1+.
 
-> **Status: esqueleto.** O `Core/` esta escrito e coberto por testes.
-> A camada Laravel (migrations, Eloquent, painel) ainda nao foi implementada.
+> **Vai cadastrar descontos, nao programar?**
+> O manual esta em [`docs/MANUAL.md`](docs/MANUAL.md) — escrito para o time
+> comercial, com receitas prontas e roteiro de familiarizacao.
+
+---
+
+## Instalacao
+
+```bash
+composer require solutionsti/laravel-discount-engine
+php artisan vendor:publish --tag=discount-engine-config
+php artisan migrate
+```
+
+O ServiceProvider e a facade `Discounts` sao descobertos automaticamente.
+
+> **Config publicado nao se atualiza sozinho.** Ao atualizar o pacote, rode
+> `vendor:publish --tag=discount-engine-config --force`. As listas de
+> condicoes e acoes vivem la; sem republicar, tipos novos nao existem nem no
+> painel nem no motor.
+
+---
 
 ## A ideia central
 
-O motor e **PHP puro**. Nenhuma classe dentro de `src/Core/` importa `Illuminate\*`.
+O motor e **PHP puro**. Nenhuma classe em `src/Core/` importa `Illuminate\*`.
 
 Isso nao e purismo: e o que permite instalar o mesmo pacote em Laravel 8 e em
-Laravel 13 sem reescrever a logica de negocio. Quando a migracao chegar, so a
-pasta `src/Laravel/` precisa de atencao.
+Laravel 13 sem reescrever logica de negocio. Na migracao, so `src/Laravel/`
+precisa de atencao.
 
 ```
 CartContext  ->  DiscountEngine  ->  DiscountResult
    (DTO)          (sem IO)            (snapshot)
 ```
 
-O motor nao le banco, nao chama HTTP, nao toca em sessao. Entrada, saida, testavel.
-
-## Estrutura
-
-```
-src/Core/
-├── Contracts/    ConditionEvaluator, DiscountAction, RuleRepository, UsageTracker
-├── Enums/        TriggerType, CombinationMode, CalculationBase, Operator, ...
-├── Context/      CartContext, CartItem, CustomerContext
-├── Money/        Money (centavos, rateio sem perda)
-├── Rule/         Rule, ConditionGroup, ConditionDefinition, ActionDefinition
-├── Conditions/   5 condicoes prontas
-├── Actions/      percentual, valor fixo, frete gratis
-├── Registry/     ConditionRegistry, ActionRegistry
-├── Engine/       DiscountEngine, ConditionMatcher
-└── Result/       DiscountResult, AppliedDiscount, RejectedRule
-```
-
-## Decisoes que valem explicar
-
-**Dinheiro em centavos.** `Money` guarda `int`. Float em dinheiro faz a soma dos
-itens divergir do total do pedido, e o financeiro descobre depois.
-
-**Rateio pelo metodo do maior resto.** `Money::allocate()` garante que a soma das
-fatias e exatamente igual ao total. Sem centavo perdido, sem centavo inventado.
-
-**Base de calculo explicita por regra.** `CalculationBase::Original` faz
-10% + 10% = 20%. `CalculationBase::Current` faz 10% + 10% = 19%. Quem cadastra a
-regra escolhe; o motor nao adivinha.
-
-**Rejeicoes sao dados, nao silencio.** O resultado traz `rejected[]` com o motivo
-de cada regra que nao entrou. E o que alimenta o simulador do painel.
-
-**Limite de uso aqui e consulta, nao reserva.** `UsageTracker` responde "ainda ha
-saldo?". A reserva definitiva acontece no fechamento do pedido, dentro de
-transacao com lock — checar aqui e confiar seria race condition classica.
-
-**Nunca recalcular pedido antigo.** O `DiscountResult` e serializavel de proposito:
-grave o snapshot no pedido. Editar uma regra nao pode reescrever historico financeiro.
-
-## Estendendo
-
-Nova condicao:
-
-```php
-final class DeliveryStateCondition implements ConditionEvaluator
-{
-    public static function key(): string { return 'delivery_state'; }
-    public static function label(): string { return 'UF de entrega'; }
-
-    public function evaluate(ConditionDefinition $definition, CartContext $cart): bool
-    {
-        return $definition->operator->compare(
-            $cart->attribute('delivery_state'),
-            $definition->value,
-        );
-    }
-}
-```
-
-Registre a chave e ela aparece no painel. O motor nao muda.
-
-## Proximos passos
-
-- [ ] Camada Laravel: migrations, models Eloquent, repositorio com cache
-- [ ] Endpoint de validacao de cupom com mensagens de erro distintas
-- [ ] Reserva de uso com lock no fechamento do pedido
-- [ ] Painel Blade + Alpine com construtor de condicoes e simulador
-- [ ] `BuyXGetY` e desconto escalonado por faixa
-- [ ] CI com matriz Laravel 8.75 / 13
-
-## Testes
-
-```bash
-composer install
-vendor/bin/phpunit
-```
-
-## Licenca
-
-MIT.
+O motor nao le banco, nao chama HTTP, nao toca em sessao. Entrada, saida,
+testavel.
 
 ---
-
-# Camada Laravel
-
-> Escrita, mas **nao executada**: o ambiente onde foi gerada nao tinha PHP nem
-> acesso ao Packagist. Os testes do `Core/` passam; a camada Laravel abaixo
-> precisa ser validada num projeto real antes de qualquer confianca.
-
-## Instalacao
-
-```bash
-composer update            # illuminate/* entrou como dependencia
-php artisan vendor:publish --tag=discount-engine-config
-php artisan migrate
-```
-
-O ServiceProvider e descoberto automaticamente. A facade `Discounts` tambem.
 
 ## Uso
 
 ```php
-use SolutionsTI\DiscountEngine\Core\Context\CartContext;
-use SolutionsTI\DiscountEngine\Core\Context\CartItem;
-use SolutionsTI\DiscountEngine\Core\Context\CustomerContext;
+use SolutionsTI\DiscountEngine\Core\Context\{CartContext, CartItem, CustomerContext, PriceComponent};
 use SolutionsTI\DiscountEngine\Core\Money\Money;
 use SolutionsTI\DiscountEngine\Laravel\Facades\Discounts;
 
@@ -154,8 +76,8 @@ $cart = new CartContext(
 $resultado = Discounts::calculate($cart);
 
 $resultado->totalDiscount()->format();   // R$ 25,00
-$resultado->finalTotal()->cents;         // para gravar no pedido
-$resultado->itemAllocations;             // desconto rateado por item
+$resultado->finalTotal()->cents;
+$resultado->itemAllocations();           // desconto exato por item
 ```
 
 Validar um cupom digitado:
@@ -171,11 +93,11 @@ return response()->json($validacao->toArray());
 Fechar o pedido:
 
 ```php
-DB::transaction(function () use ($cart, $user) {
+DB::transaction(function () use ($cart, $user, $pedido) {
     $resultado = Discounts::calculate($cart);   // recalcula, nunca confia no front
 
     if (! Discounts::reserve($resultado, $pedido->id, $user->id)) {
-        throw new CupomEsgotadoException();     // acabou entre a simulacao e o fechamento
+        throw new CupomEsgotadoException();     // esgotou entre a simulacao e o fechamento
     }
 
     $pedido->update([
@@ -185,17 +107,68 @@ DB::transaction(function () use ($cart, $user) {
 });
 ```
 
-## Formato das regras no banco
+---
 
-Condicoes e acoes vao em colunas JSON.
+## Conceitos
+
+Uma **regra** tem condicoes (decidem *se* aplica) e acoes (decidem *o que*
+faz). As duas partes sao independentes.
+
+### Alvos
+
+| Alvo | Onde incide |
+|---|---|
+| `cart` | Todo o carrinho |
+| `items` | Os itens (equivalente a `cart` na pratica) |
+| `components` | Apenas os componentes de preco indicados |
+| `shipping` | O frete |
+
+### Tres niveis de recorte
+
+Confundir estes tres e o erro mais caro do sistema:
+
+| Onde | Decide |
+|---|---|
+| Condicoes da regra | **Se** a regra roda |
+| `meta.category_ids` / `meta.skus` | **Em quais produtos** |
+| `meta.component_types` | **Em qual parte do preco** |
+
+Condicao nao recorta. "Carrinho tem camisas" libera a regra, mas o desconto
+cairia tambem nas canecas — para limitar aos produtos certos, use
+`category_ids`.
+
+### Condicoes disponiveis
+
+| Chave | O que avalia |
+|---|---|
+| `cart_subtotal` | Subtotal em centavos |
+| `total_quantity` | Unidades no carrinho |
+| `category_quantity` | Unidades de uma categoria (`meta.category_id`) |
+| `first_purchase` | Primeira compra — exige cliente identificado |
+| `customer_group` | Grupos do cliente |
+
+### Acoes disponiveis
+
+| Chave | O que faz |
+|---|---|
+| `percentage` | Percentual sobre o escopo |
+| `fixed_amount` | Valor fixo em centavos |
+| `free_shipping` | Zera o frete (ou subsidia, com `max_discount_cents`) |
+| `buy_x_get_y` | Leve X pague Y |
+| `tiered` | Escalonado por faixa |
+| `component_unit_price` | Preco promocional nas primeiras unidades |
+
+---
+
+## Formato das regras
+
+Condicoes e acoes ficam em colunas JSON.
 
 ```php
 DiscountRule::create([
     'name' => '10% acima de R$ 200, so na primeira compra',
     'trigger' => 'automatic',
     'priority' => 10,
-    'combination_mode' => 'stackable',
-    'calculation_base' => 'current',
     'conditions' => [
         'logic' => 'and',
         'children' => [
@@ -225,155 +198,138 @@ Grupos aninhados: um filho com a chave `logic` vira subgrupo.
 ],
 ```
 
-## Por que JSON e nao tabelas normalizadas
-
-Mudei de ideia em relacao ao plano inicial. A arvore de condicoes e
-arbitrariamente aninhada; normalizar isso exige `parent_id` com self-join e
-uma hidratacao recursiva bem mais fragil de manter.
-
-O preco: nao da para perguntar em SQL "quais regras usam a categoria 12".
-Se isso virar necessidade real, a saida e uma tabela lateral de indice
-alimentada por observer — sem mexer no formato principal.
-
-## Concorrencia
-
-Ha dois momentos distintos, e confundi-los e a causa classica de cupom
-usado alem do limite:
-
-| Momento | Classe | Faz o que |
-|---|---|---|
-| Simulacao do carrinho | `DatabaseUsageTracker` | Le o saldo, sem lock |
-| Fechamento do pedido | `UsageReserver` | `lockForUpdate` + incremento |
-
-Travar linha a cada recalculo de carrinho seria desastroso sob carga.
-A garantia real esta no fechamento, e a `unique(order_id, rule_id)` da tabela
-de usos e a segunda linha de defesa contra retry duplicado.
-
-## O que falta
-
-- [ ] Testes da camada Laravel (Testbench + SQLite em memoria)
-- [ ] Painel Blade + Alpine com construtor de condicoes e simulador
-- [ ] `BuyXGetY` e desconto escalonado por faixa
-- [ ] Endpoint HTTP pronto para o checkout
-- [ ] CI com matriz Laravel 8.75 / 13
-
-## Teste de concorrencia
-
-O PHPUnit e single-threaded: os testes de integracao verificam a logica
-sequencial, mas nao provam que o `lockForUpdate` segura sob disputa real.
-
-Este comando dispara N processos PHP independentes — cada um com sua propria
-conexao — todos tentando consumir o mesmo cupom no mesmo instante:
-
-```bash
-php artisan discount:race-test --workers=20 --limit=1
-```
-
-Cada worker calcula o carrinho ANTES do portao de largada e reserva DEPOIS.
-Isso reproduz o cenario real: todo mundo viu o desconto na tela enquanto
-havia saldo, e so entao apertou "finalizar".
-
-Rodar contra **MySQL/InnoDB**. O SQLite trava o arquivo inteiro e o resultado
-nao diz nada sobre producao.
-
-Opcoes: `--workers`, `--limit`, `--code`, `--delay`, `--show-workers`.
-
-O comando desativa temporariamente as regras automaticas ativas durante o
-teste (e restaura no fim). Sem isso a medicao contamina: um carrinho com
-10% automatico tem desconto mesmo quando o cupom e barrado, e `reserve()`
-retorna sucesso por ter reservado a OUTRA regra.
-
-O comando cria e apaga dados de teste — nao rodar em producao.
-
-### Resultados medidos
-
-MySQL 8 / InnoDB, 50 processos PHP independentes, cada um com sua propria
-conexao, todos calculando o carrinho antes do portao e reservando no mesmo
-instante:
-
-| Cenario | Reservas aceitas | `used_count` | Linhas gravadas | Erros |
-|---|---|---|---|---|
-| 50 processos, limite 1 | 1 | 1 | 1 | 0 |
-| 50 processos, limite 3 | 3 | 3 | 3 | 0 |
-
-Nenhum deadlock, nenhum lock wait timeout. O limite foi respeitado com
-exatidao nos dois cenarios, e o contador do cupom ficou sempre em sincronia
-com as linhas de auditoria.
-
-Reproduzir:
-
-```bash
-php artisan discount:race-test --workers=50 --limit=1 --delay=15
-php artisan discount:race-test --workers=50 --limit=3 --delay=15
-```
-
-O `--delay` precisa ser generoso: no Windows o boot do `php artisan` leva
-tempo suficiente para os ultimos processos perderem o portao. Com delay
-curto, eles aparecem como `skipped` e a concorrencia real fica menor que a
-anunciada.
+**Por que JSON e nao tabelas normalizadas.** A arvore de condicoes e
+arbitrariamente aninhada; normalizar exigiria `parent_id` com self-join e
+hidratacao recursiva bem mais fragil. O preco e nao dar para perguntar em SQL
+"quais regras usam a categoria 12" — se virar necessidade, resolve-se com uma
+tabela lateral de indice.
 
 ---
 
-# Acoes avancadas
+## Produtos compostos
 
-## Leve X pague Y
+Um produto customizavel nao tem "um preco". Camisa estampada e o preco da
+peca mais o da estamparia — e regras comerciais costumam incidir so em uma
+dessas partes.
 
 ```php
-'actions' => [
-    [
-        'type' => 'buy_x_get_y',
-        'value' => 0,
-        'target' => 'items',
-        'meta' => [
-            'buy' => 2,                 // paga 2
-            'free' => 1,                // leva 3
-            'free_item' => 'cheapest',  // ou 'most_expensive'
-            'category_ids' => [7],      // opcional: restringe a categorias
-            'skus' => [],               // opcional: restringe a SKUs
-        ],
+new CartItem(
+    id: $linha->id,
+    sku: 'CAMISA-P',
+    quantity: 2,                         // duas camisas
+    categoryIds: [7],
+    components: [
+        new PriceComponent('base',  Money::fromCents(4000)),
+        new PriceComponent('print', Money::fromCents(1500), quantity: 3),
     ],
-],
+);
 ```
 
-O agrupamento e por **unidade**, nao por linha: um item com quantidade 3 ja
-fecha um grupo sozinho. Grupos incompletos no fim nao geram brinde.
+Duas camisas com tres estampas cada = 6 estampas. A quantidade do item
+multiplica a do componente.
 
-A escolha de qual unidade sai de graca acontece **dentro de cada grupo**, nao
-globalmente. Com 6 unidades a R$ 50, 40, 30, 20, 10 e 10, os grupos ficam
-(50, 40, 30) e (20, 10, 10) — saem de graca o 30 e o 10, total R$ 40.
-Uma implementacao ingenua que pegasse "as 2 mais baratas do carrinho" daria
-R$ 20, e a diferenca aparece na margem.
+Os tipos (`base`, `print`, `bordado`) sao strings livres: o vocabulario e do
+sistema hospedeiro.
 
-## Escalonado por faixa
+Item sem `components` continua funcionando — o motor cria um `base` a partir
+do `unitPrice`. Se voce passar os dois e divergirem, o construtor estoura:
+divergencia ai e bug de integracao, nao caso de negocio.
+
+### Desconto so na estamparia
 
 ```php
-'actions' => [
-    [
-        'type' => 'tiered',
-        'value' => 0,
-        'target' => 'cart',
-        'meta' => [
-            'basis' => 'subtotal',   // ou 'quantity'
-            'tiers' => [
-                ['min' => 10000, 'percent' => 5],
-                ['min' => 30000, 'percent' => 10],
-                ['min' => 50000, 'percent' => 15],
-            ],
-        ],
-    ],
-],
+['type' => 'percentage', 'value' => 20, 'target' => 'components',
+ 'meta' => ['component_types' => ['print'], 'category_ids' => [7]]]
+```
+
+### Primeira estampa a R$ 1,99
+
+```php
+['type' => 'component_unit_price', 'value' => 0, 'target' => 'components',
+ 'meta' => [
+     'component_types' => ['print'],
+     'category_ids' => [7],
+     'first_n' => 1,
+     'unit_price_cents' => 199,
+     'per' => 'item_unit',
+ ]]
+```
+
+O `per` muda o resultado:
+
+| `per` | 2 camisas com 3 estampas cada |
+|---|---|
+| `item_unit` | 2 estampas promocionais (uma por camisa) |
+| `line` | 1 estampa promocional |
+| `cart` | 1 estampa promocional |
+
+A regra nunca encarece: se o componente ja custa menos que o preco
+promocional, nao ha desconto.
+
+### Leve X pague Y
+
+```php
+['type' => 'buy_x_get_y', 'value' => 0, 'target' => 'components',
+ 'meta' => ['component_types' => ['base'], 'buy' => 2, 'free' => 1,
+            'free_item' => 'cheapest']]
+```
+
+A escolha de quem sai de graca acontece **dentro de cada grupo**, nao no
+carrinho inteiro. Com 6 unidades a 50, 40, 30, 20, 10 e 10, os grupos sao
+(50,40,30) e (20,10,10) — saem o 30 e um 10, total 40. Pegar "as 2 mais
+baratas do carrinho" daria 20, e a diferenca aparece na margem.
+
+### Escalonado por faixa
+
+```php
+['type' => 'tiered', 'value' => 0, 'target' => 'cart',
+ 'meta' => ['basis' => 'subtotal', 'tiers' => [
+     ['min' => 10000, 'percent' => 5],
+     ['min' => 30000, 'percent' => 10],
+     ['min' => 50000, 'percent' => 15],
+ ]]]
 ```
 
 Vale a faixa **mais alta alcancada**, sem soma entre faixas. As faixas nao
-precisam vir ordenadas — quem cadastra pelo painel raramente mantem ordem.
+precisam vir ordenadas. Cada uma aceita `percent` ou `amount_cents`.
 
-Cada faixa aceita `percent` ou `amount_cents`.
+---
 
-## Rateio por item — exato
+## Acumulo
+
+Tres mecanismos, do mais amplo ao mais fino.
+
+**`combination_mode: exclusive`** — se a regra aplicar, ela e a unica do
+pedido: descarta o que veio antes e bloqueia o que viria depois.
+
+**`resolution_group` + `resolution_strategy`** — regras do mesmo grupo
+competem; regras de grupos diferentes continuam acumulando.
+
+| Estrategia | Comportamento |
+|---|---|
+| `first_by_priority` | Vence a primeira na ordem de prioridade |
+| `highest_discount` | Simula todas e aplica a de maior desconto |
+
+> `first_by_priority` **ignora o valor**. Uma regra de 5% com prioridade menor
+> vence uma de 20% do mesmo grupo. O painel avisa quando essa combinacao e
+> escolhida.
+
+**`stop_further_processing`** — mantem o ja aplicado, mas encerra o pipeline.
+
+**`calculation_base`** decide sobre qual valor o percentual incide:
+`current` faz 10%+10% = 19%; `original` faz 20%.
+
+**`global_cap_percentage`** (config) e a rede de seguranca: teto para a soma
+de todas as regras. Incide sobre itens; frete fica de fora, senao um frete
+caro consumiria a cota de desconto dos produtos.
+
+---
+
+## Rateio por item
 
 Cada acao devolve uma `DiscountAllocation`: um mapa `(item, componente) =>
-valor`. Nao ha rateio proporcional a posteriori — a acao diz de onde saiu
-cada centavo.
+valor`. Nao ha rateio proporcional a posteriori — a acao diz de onde saiu cada
+centavo.
 
 ```php
 $resultado->itemAllocations();          // ['CAMISA-1' => Money, ...]
@@ -384,112 +340,23 @@ $resultado->discountByComponentType();  // ['print' => Money, ...]
 E o que permite emitir nota fiscal com desconto discriminado por item sem
 divergencia entre a soma das linhas e o total do pedido.
 
----
-
-# Produtos compostos
-
-Um produto customizavel nao tem "um preco". Camisa estampada e o preco da
-peca mais o da estamparia — e as regras comerciais frequentemente incidem
-so em uma dessas partes.
-
-## Montando o item
-
-```php
-use SolutionsTI\DiscountEngine\Core\Context\PriceComponent;
-
-new CartItem(
-    id: $linha->id,
-    sku: 'CAMISA-P',
-    quantity: 2,                         // duas camisas
-    components: [
-        new PriceComponent('base',  Money::fromCents(4000)),
-        new PriceComponent('print', Money::fromCents(1500), quantity: 3),
-    ],
-);
-```
-
-Duas camisas com tres estampas cada = 6 estampas no total. A quantidade do
-item multiplica a do componente.
-
-Os tipos (`base`, `print`, `bordado`, `tag`) sao strings livres: o
-vocabulario e do sistema hospedeiro.
-
-Item sem `components` continua funcionando — o motor cria um componente
-`base` a partir do `unitPrice`. Nada do codigo existente quebra.
-
-O `unitPrice` de um item composto e derivado da soma. Se voce passar os dois
-e eles divergirem, o construtor estoura: divergencia ai e bug de integracao,
-nao caso de negocio.
-
-## Desconto so na estamparia
-
-```php
-'actions' => [
-    [
-        'type' => 'percentage',
-        'value' => 20,
-        'target' => 'components',
-        'meta' => ['component_types' => ['print']],
-    ],
-],
-```
-
-A peca nao e tocada. Invertendo para `['base']`, o desconto vai so na peca
-e a estamparia fica a preco cheio.
-
-## Primeira estampa a R$ 1,99
-
-```php
-'actions' => [
-    [
-        'type' => 'component_unit_price',
-        'value' => 0,
-        'target' => 'components',
-        'meta' => [
-            'component_types' => ['print'],
-            'first_n' => 1,
-            'unit_price_cents' => 199,
-            'per' => 'item_unit',
-        ],
-    ],
-],
-```
-
-O `per` e a decisao que mais muda o resultado:
-
-| `per` | 2 camisas com 3 estampas cada |
-|---|---|
-| `item_unit` | 2 estampas promocionais (uma por camisa) |
-| `line` | 1 estampa promocional (uma por linha) |
-| `cart` | 1 estampa promocional (uma no pedido) |
-
-O desconto e a diferenca entre o preco cheio e o promocional. Se o
-componente ja custa menos que o preco promocional, nao ha desconto — a
-regra nunca encarece nada.
-
-## Combinando
-
-As regras compoem. "Primeira estampa a 1,99 E 10% no restante da
-estamparia" sao duas acoes na mesma regra, ou duas regras acumulaveis com
-`calculation_base: current` — a segunda incide sobre o que sobrou da
-primeira.
+Dinheiro trafega em centavos (`int`) dentro do motor, e o rateio usa o metodo
+do maior resto: a soma das fatias e sempre exatamente igual ao total.
 
 ---
 
-# Painel administrativo
-
-Etapa 1: CRUD completo das regras, com condicoes e acoes em JSON validado.
-O construtor visual e o simulador vem na etapa 2.
-
-## Acesso
+## Painel administrativo
 
 ```
 /admin/descontos
+/admin/descontos/simulador
 ```
 
-Prefixo, middleware e ativacao ficam em `config/discount-engine.php`.
+CRUD de regras com construtor visual de condicoes e acoes, e um simulador que
+monta um carrinho de teste, roda o motor de verdade e mostra **o que nao
+aplicou e por que**.
 
-## SEGURANCA — leia antes de subir
+### SEGURANCA — leia antes de subir
 
 O middleware padrao e apenas `web`, **sem autenticacao**. Isso existe para o
 painel funcionar de imediato em ambiente local.
@@ -500,47 +367,182 @@ painel funcionar de imediato em ambiente local.
 ],
 ```
 
-Enquanto o middleware for so `web`, o painel exibe um aviso vermelho no topo
-de todas as telas. Quem alcanca essa URL reescreve as regras de preco da loja.
+Enquanto o middleware for so `web`, o painel exibe um aviso vermelho no topo.
+Quem alcanca essa URL reescreve as regras de preco da loja.
 
-Para desligar o painel por completo:
+Para desligar: `DISCOUNT_PANEL_ENABLED=false`.
 
-```
-DISCOUNT_PANEL_ENABLED=false
-```
+### Validacao estrutural
 
-## Validacao estrutural
+O JSON e validado antes de gravar, contra os registries. Erro de digitacao
+vira mensagem no formulario, nao excecao no checkout dias depois. O validador
+pega JSON malformado, condicao ou acao nao registrada, operador invalido,
+alvo `components` sem `component_types`, `tiered` sem faixas e percentual
+acima de 100.
 
-O JSON e validado antes de gravar, contra os registries de condicoes e acoes.
-Erro de digitacao vira mensagem no formulario, nao excecao no checkout de um
-cliente real tres dias depois. O validador pega:
+### Cupons
 
-- JSON malformado
-- condicao ou acao nao registrada (e lista as disponiveis)
-- operador invalido
-- alvo `components` sem `meta.component_types`
-- `tiered` sem faixas, faixa sem `min` ou sem `percent`/`amount_cents`
-- `component_unit_price` sem `unit_price_cents`
-- percentual acima de 100
-
-## Cupons
-
-Varios codigos por regra, um por linha. Sao normalizados em caixa alta e
-deduplicados.
+Varios codigos por regra, um por linha, normalizados em caixa alta.
 
 Codigo removido da lista e apagado — **exceto se ja tiver sido usado**. Nesse
-caso ele e apenas desativado e o painel avisa: apagar a linha quebraria a
-referencia dos usos gravados e o historico do pedido.
+caso e apenas desativado e o painel avisa: apagar quebraria a referencia dos
+usos gravados. O mesmo vale para a regra.
 
-A mesma logica vale para a regra: regra com uso registrado nao pode ser
-apagada, so desativada.
-
-## Publicando as views
+### Publicando as views
 
 ```bash
 php artisan vendor:publish --tag=discount-engine-views
 ```
 
-As views usam Tailwind e Alpine via CDN, para o pacote funcionar em Laravel 8
-e 13 sem exigir build de assets do app hospedeiro. Se o seu projeto ja compila
-Tailwind, publique e troque os `<script>` do layout.
+Tailwind e Alpine vem por CDN, para o pacote funcionar em Laravel 8 e 13 sem
+exigir build de assets do app hospedeiro.
+
+---
+
+## Concorrencia
+
+Dois momentos distintos, e confundi-los e a causa classica de cupom usado
+alem do limite:
+
+| Momento | Classe | Faz o que |
+|---|---|---|
+| Simulacao do carrinho | `DatabaseUsageTracker` | Le o saldo, sem lock |
+| Fechamento do pedido | `UsageReserver` | `lockForUpdate` + incremento |
+
+Travar linha a cada recalculo de carrinho seria desastroso sob carga. A
+garantia real esta no fechamento, e a `unique(order_id, rule_id)` da tabela de
+usos e a segunda linha de defesa contra retry duplicado.
+
+A recusa lanca excecao interna em vez de `return false`: retorno normal de
+dentro de `DB::transaction()` commita, e com varias regras aplicadas isso
+deixaria as anteriores gravadas.
+
+### Resultados medidos
+
+MySQL 8 / InnoDB, 50 processos PHP independentes, cada um com sua conexao,
+todos calculando antes do portao e reservando no mesmo instante:
+
+| Cenario | Reservas aceitas | `used_count` | Linhas gravadas | Erros |
+|---|---|---|---|---|
+| 50 processos, limite 1 | 1 | 1 | 1 | 0 |
+| 50 processos, limite 3 | 3 | 3 | 3 | 0 |
+
+Nenhum deadlock, nenhum lock wait timeout.
+
+Reproduzir:
+
+```bash
+php artisan discount:race-test --workers=50 --limit=1 --delay=15
+```
+
+O comando desativa temporariamente as regras automaticas ativas durante o
+teste e restaura no fim — sem isso a medicao contamina. O `--delay` precisa
+ser generoso: no Windows o boot do `php artisan` faz os ultimos processos
+perderem o portao.
+
+Nao rodar em producao: o comando cria e apaga dados de teste.
+
+---
+
+## Estendendo
+
+Nova condicao:
+
+```php
+final class DeliveryStateCondition implements ConditionEvaluator
+{
+    public static function key(): string { return 'delivery_state'; }
+    public static function label(): string { return 'UF de entrega'; }
+
+    public function evaluate(ConditionDefinition $definition, CartContext $cart): bool
+    {
+        return $definition->operator->compare(
+            $cart->attribute('delivery_state'),
+            $definition->value,
+        );
+    }
+}
+```
+
+Registre a chave no `config/discount-engine.php` publicado e ela aparece no
+painel. O motor nao muda.
+
+Tipos customizados que nao estejam no `PanelFieldMap` continuam editaveis no
+painel: caem no modo `raw`, com valor digitado como JSON.
+
+Acoes seguem o mesmo padrao, implementando `DiscountAction`: recebem um
+`DiscountScope` ja recortado e devolvem uma `DiscountAllocation`.
+
+---
+
+## Estrutura
+
+```
+src/Core/            PHP puro, zero Laravel
+├── Contracts/       ConditionEvaluator, DiscountAction, RuleRepository, UsageTracker
+├── Enums/           TriggerType, CombinationMode, CalculationBase, ResolutionStrategy...
+├── Context/         CartContext, CartItem, PriceComponent, CustomerContext
+├── Money/           Money (centavos, rateio sem perda)
+├── Allocation/      DiscountAllocation, DiscountScope, ScopedComponent
+├── Rule/            Rule, ConditionGroup, ConditionDefinition, ActionDefinition
+├── Conditions/      5 condicoes
+├── Actions/         6 acoes
+├── Registry/        ConditionRegistry, ActionRegistry
+├── Engine/          DiscountEngine, ConditionMatcher
+└── Result/          DiscountResult, AppliedDiscount, RejectedRule
+
+src/Laravel/         camada de integracao
+├── Models/          Eloquent
+├── Repositories/    EloquentRuleRepository (com cache), RuleHydrator
+├── Support/         UsageReserver, CartContextFactory, validador, PanelFieldMap
+├── Http/            controllers do painel e do simulador
+└── Console/         discount:race-test
+```
+
+---
+
+## Testes
+
+```bash
+composer install
+vendor/bin/phpunit --testdox
+```
+
+124 testes. Padrao SQLite em memoria; para rodar contra MySQL:
+
+```bash
+DB_CONNECTION=mysql DB_DATABASE=discount_engine_test vendor/bin/phpunit
+```
+
+Vale rodar nos dois: SQLite pega logica, MySQL pega diferenca de tipo (coluna
+JSON, collation, foreign key) que o SQLite deixa passar.
+
+---
+
+## Estado e limitacoes conhecidas
+
+**O motor esta coberto; a interface nao.** Os 124 testes cobrem Core, camada
+Laravel e as rotas do painel. Nenhum toca JavaScript — o construtor visual e
+a parte mais fragil do pacote hoje.
+
+**Cupom consumido nao volta.** Nao ha devolucao de cota em cancelamento, nem
+em pagamento recusado. E politica deliberada contra fraude, mas significa que
+pagamento nao concluido tambem queima o uso. Ver
+[`docs/MANUAL.md`](docs/MANUAL.md#cancelamento-e-devolução).
+
+**Devolucao parcial nao tem API.** A informacao existe no snapshot
+(`item_allocations`), mas nao ha metodo nem tela para consultar.
+
+**Sem relatorios.** Uso de cupons e custo de campanha precisam ser
+consultados no banco.
+
+**Laravel 13 exige PHP 8.3+.** O pacote declara `php: ^8.1`, mas a migracao
+para o L13 implica subir o runtime — decisao de infraestrutura, nao de codigo.
+
+**Sem CI.** A matriz L8/L13 ainda nao existe.
+
+---
+
+## Licenca
+
+MIT. Ver [LICENSE](LICENSE).

@@ -17,7 +17,8 @@ consultadas conforme a necessidade.
 4. [Receitas prontas](#receitas-prontas)
 5. [Quando o desconto não aparece](#quando-o-desconto-não-aparece)
 6. [Armadilhas conhecidas](#armadilhas-conhecidas)
-7. [Glossário](#glossário)
+7. [Cancelamento e devolução](#cancelamento-e-devolução)
+8. [Glossário](#glossário)
 
 ---
 
@@ -349,6 +350,61 @@ só desativada.
 
 Cada pedido guarda uma fotografia do desconto no momento da compra. Editar ou
 desativar uma regra hoje **não muda** nenhum pedido já fechado.
+
+---
+
+## Cancelamento e devolução
+
+### Cupom usado não volta
+
+**Esta é a política atual do sistema: uma vez consumido, o cupom não retorna
+ao estoque de usos — nem se o pedido for cancelado.**
+
+Um cupom com limite de 100 usos que teve 30 pedidos, sendo 5 cancelados,
+continua com 70 disponíveis. Os 5 cancelados seguem contando.
+
+O motivo é evitar fraude: se o uso voltasse, alguém poderia fazer o pedido,
+cancelar e repetir indefinidamente, transformando um cupom de uso único em
+ilimitado.
+
+**Consequência prática que vale conhecer:** isso vale para qualquer
+cancelamento, inclusive os que não são culpa do cliente. Pagamento recusado,
+Pix não pago ou boleto vencido também consomem o uso. O cliente que teve o
+cartão negado perde o cupom.
+
+Se isso virar um problema recorrente, converse com a equipe técnica — existe
+solução, mas depende de como o checkout trata pagamento pendente. Não é algo
+que se resolva pelo painel.
+
+### O que fazer quando alguém reclama
+
+**"Meu pedido foi cancelado e o cupom não funciona mais"**
+É o comportamento esperado. Se quiser conceder mesmo assim, cadastre um novo
+código para aquele cliente — uma regra por cupom aceita vários códigos, então
+dá para adicionar um código individual à campanha existente sem criar regra
+nova.
+
+**"O cupom esgotou mas tivemos poucos pedidos"**
+Provavelmente há pedidos cancelados ou pagamentos não concluídos contando no
+total. Peça à equipe técnica o relatório de usos daquele cupom.
+
+**"Preciso liberar mais usos"**
+Edite a regra e aumente o "Limite total". O contador de usos já consumidos
+não é afetado — se estava em 100/100 e você mudar para 150, ficam 50
+disponíveis.
+
+### Devolução parcial
+
+O cliente devolveu um item de três: quanto reembolsar?
+
+O sistema **registra** quanto de desconto coube a cada item do pedido, então
+a informação existe. Mas ainda **não há tela** para consultar isso — hoje
+depende da equipe técnica.
+
+Um ponto que não tem resposta automática: em "Leve 3, pague 2", se o cliente
+devolve uma peça, ela era a gratuita ou uma das pagas? Isso é decisão
+comercial, não cálculo. Vale definir a política antes de a primeira devolução
+acontecer.
 
 ---
 

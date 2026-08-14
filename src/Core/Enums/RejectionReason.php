@@ -18,6 +18,8 @@ enum RejectionReason: string
     case UsageLimitReached = 'usage_limit_reached';
     case ExclusivityConflict = 'exclusivity_conflict';
     case StoppedByPreviousRule = 'stopped_by_previous_rule';
+    case SupersededByExclusiveRule = 'superseded_by_exclusive';
+    case SupersededByBetterOffer = 'superseded_by_better_offer';
     case NoDiscountValue = 'no_discount_value';
 
     public function label(): string
@@ -30,6 +32,8 @@ enum RejectionReason: string
             self::UsageLimitReached => 'Limite de uso atingido',
             self::ExclusivityConflict => 'Conflita com um desconto ja aplicado',
             self::StoppedByPreviousRule => 'Interrompida por uma regra anterior',
+            self::SupersededByExclusiveRule => 'Descartada por um desconto exclusivo',
+            self::SupersededByBetterOffer => 'Havia uma oferta melhor no mesmo grupo',
             self::NoDiscountValue => 'O calculo resultou em desconto zero',
         };
     }

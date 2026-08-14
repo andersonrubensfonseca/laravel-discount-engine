@@ -7,12 +7,24 @@ namespace SolutionsTI\DiscountEngine\Core\Rule;
 use DateTimeImmutable;
 use SolutionsTI\DiscountEngine\Core\Enums\CalculationBase;
 use SolutionsTI\DiscountEngine\Core\Enums\CombinationMode;
+use SolutionsTI\DiscountEngine\Core\Enums\ResolutionStrategy;
 use SolutionsTI\DiscountEngine\Core\Enums\TriggerType;
 
 /**
  * A regra em si, ja hidratada a partir do banco pelo repositorio.
  *
- * Repare que nao ha nada de Eloquent aqui: e um objeto de dominio puro.
+ * Tres mecanismos controlam acumulo, do mais amplo ao mais fino:
+ *
+ *   combinationMode = Exclusive
+ *     Se esta regra aplicar, ela e a UNICA do pedido. Descarta o que veio
+ *     antes e bloqueia o que viria depois.
+ *
+ *   resolutionGroup + resolutionStrategy
+ *     Regras do mesmo grupo competem entre si; regras de grupos diferentes
+ *     (ou sem grupo) continuam acumulando normalmente.
+ *
+ *   stopFurtherProcessing
+ *     Mantem o que ja foi aplicado, mas encerra o pipeline.
  */
 final class Rule
 {
@@ -26,7 +38,8 @@ final class Rule
         public readonly ?string $couponCode = null,
         public readonly int $priority = 100,
         public readonly CombinationMode $combinationMode = CombinationMode::Stackable,
-        public readonly ?string $exclusivityGroup = null,
+        public readonly ?string $resolutionGroup = null,
+        public readonly ResolutionStrategy $resolutionStrategy = ResolutionStrategy::FirstByPriority,
         public readonly bool $stopFurtherProcessing = false,
         public readonly CalculationBase $calculationBase = CalculationBase::Current,
         public readonly bool $active = true,
@@ -56,5 +69,12 @@ final class Rule
     public function isExclusive(): bool
     {
         return $this->combinationMode === CombinationMode::Exclusive;
+    }
+
+    /** O grupo desta regra decide pelo maior desconto? */
+    public function usesBestOfferResolution(): bool
+    {
+        return $this->resolutionGroup !== null
+            && $this->resolutionStrategy === ResolutionStrategy::HighestDiscount;
     }
 }

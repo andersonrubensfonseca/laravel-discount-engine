@@ -26,13 +26,10 @@ use SolutionsTI\DiscountEngine\Core\Rule\Rule;
 /**
  * O coracao do pacote.
  *
- * Fluxo: reune candidatas -> ordena por prioridade -> filtra -> monta o
- * escopo de cada acao -> aplica -> respeita exclusividade -> teto global.
- *
  * Zero IO. Zero framework. Recebe CartContext, devolve DiscountResult.
  *
- * Desde a v0.3 o motor acumula uma DiscountAllocation em vez de somas
- * soltas: cada centavo sabe de qual componente de qual item ele saiu.
+ * Cada centavo sabe de qual componente de qual item ele saiu, e cada regra
+ * descartada sabe por que — os dois alimentam nota fiscal e simulador.
  */
 final class DiscountEngine
 {
@@ -51,26 +48,49 @@ final class DiscountEngine
         $now ??= new DateTimeImmutable();
 
         $subtotal = $cart->subtotal();
+        $candidates = $this->candidates($cart);
+
         $accumulated = DiscountAllocation::empty();
 
         /** @var array<int,AppliedDiscount> $applied */
         $applied = [];
         /** @var array<int,RejectedRule> $rejected */
         $rejected = [];
-        /** @var array<int,string> $usedExclusivityGroups */
-        $usedExclusivityGroups = [];
+        /** @var array<array-key,string> $appliedRules  id => nome */
+        $appliedRules = [];
+        /**
+         * grupo => as rejeicoes dele ja foram emitidas?
+         *
+         * true  o grupo foi resolvido por melhor oferta, que ja registrou
+         *       vencedor e perdedores. Os membros seguintes sao pulados em
+         *       silencio, senao apareceriam rejeitados duas vezes — e o
+         *       proprio vencedor entraria na lista de rejeitadas.
+         * false o grupo foi resolvido por prioridade: quem chega depois e
+         *       rejeitado por conflito, um a um.
+         *
+         * @var array<string,bool> $resolvedGroups
+         */
+        $resolvedGroups = [];
 
         $halted = false;
-        $exclusiveApplied = false;
 
-        foreach ($this->candidates($cart) as $rule) {
+        foreach ($candidates as $rule) {
             if ($halted) {
                 $rejected[] = new RejectedRule($rule->id, $rule->name, RejectionReason::StoppedByPreviousRule);
 
                 continue;
             }
 
-            $rejection = $this->reasonToSkip($rule, $cart, $now, $exclusiveApplied, $usedExclusivityGroups);
+            // Grupo ja decidido: quem chega depois nao entra.
+            if ($rule->resolutionGroup !== null && array_key_exists($rule->resolutionGroup, $resolvedGroups)) {
+                if ($resolvedGroups[$rule->resolutionGroup] === false) {
+                    $rejected[] = new RejectedRule($rule->id, $rule->name, RejectionReason::ExclusivityConflict);
+                }
+
+                continue;
+            }
+
+            $rejection = $this->reasonToSkip($rule, $cart, $now);
 
             if ($rejection !== null) {
                 $rejected[] = new RejectedRule($rule->id, $rule->name, $rejection);
@@ -78,64 +98,182 @@ final class DiscountEngine
                 continue;
             }
 
-            $ruleAllocation = DiscountAllocation::empty();
+            if ($rule->usesBestOfferResolution()) {
+                $outcome = $this->resolveBestOffer($rule, $candidates, $cart, $now, $accumulated);
 
-            foreach ($rule->actions as $action) {
-                $scope = $this->buildScope($rule, $action, $cart, $accumulated->merge($ruleAllocation));
+                $resolvedGroups[$rule->resolutionGroup] = true;
+                $rejected = array_merge($rejected, $outcome['rejected']);
 
-                if ($scope->isEmpty()) {
+                if ($outcome['rule'] === null) {
                     continue;
                 }
 
-                $result = $this->actions->get($action->type)->calculate($action, $cart, $scope);
+                $winner = $outcome['rule'];
+                $simulation = $outcome['simulation'];
+            } else {
+                $winner = $rule;
+                $simulation = $this->simulate($rule, $cart, $accumulated);
 
-                if ($result->isEmpty()) {
+                if ($simulation['allocation']->isEmpty()) {
+                    $rejected[] = new RejectedRule($rule->id, $rule->name, RejectionReason::NoDiscountValue);
+
                     continue;
                 }
-
-                $ruleAllocation = $ruleAllocation->merge($result);
-
-                $applied[] = new AppliedDiscount(
-                    ruleId: $rule->id,
-                    ruleName: $rule->name,
-                    actionType: $action->type,
-                    target: $action->target,
-                    amount: $result->total(),
-                    couponCode: $rule->couponCode,
-                    allocation: $result,
-                );
             }
 
-            if ($ruleAllocation->isEmpty()) {
-                $rejected[] = new RejectedRule($rule->id, $rule->name, RejectionReason::NoDiscountValue);
+            /**
+             * Exclusivo de verdade: a regra e a UNICA do pedido.
+             *
+             * Ate a v0.3 isto so bloqueava as regras seguintes — quem tinha
+             * aplicado antes continuava valendo, e o cliente levava os dois.
+             * Como a simulacao ja foi feita contra uma base limpa, basta
+             * descartar o que veio antes.
+             */
+            if ($winner->isExclusive()) {
+                foreach ($appliedRules as $id => $name) {
+                    $rejected[] = new RejectedRule($id, $name, RejectionReason::SupersededByExclusiveRule);
+                }
 
-                continue;
+                $applied = [];
+                $appliedRules = [];
+                $accumulated = DiscountAllocation::empty();
+                $halted = true;
             }
 
-            $accumulated = $accumulated->merge($ruleAllocation);
+            $accumulated = $accumulated->merge($simulation['allocation']);
+            $applied = array_merge($applied, $simulation['applied']);
+            $appliedRules[$winner->id] = $winner->name;
 
-            if ($rule->exclusivityGroup !== null) {
-                $usedExclusivityGroups[] = $rule->exclusivityGroup;
+            if ($winner->resolutionGroup !== null && ! array_key_exists($winner->resolutionGroup, $resolvedGroups)) {
+                $resolvedGroups[$winner->resolutionGroup] = false;
             }
 
-            if ($rule->isExclusive()) {
-                $exclusiveApplied = true;
-            }
-
-            if ($rule->stopFurtherProcessing) {
+            if ($winner->stopFurtherProcessing) {
                 $halted = true;
             }
         }
 
-        $accumulated = $this->applyGlobalCap($accumulated, $subtotal);
-
         return new DiscountResult(
             subtotal: $subtotal,
             shippingCost: $cart->shippingCost,
-            allocation: $accumulated,
+            allocation: $this->applyGlobalCap($accumulated, $subtotal),
             applied: $applied,
             rejected: $rejected,
         );
+    }
+
+    /**
+     * Simula uma regra sem se comprometer com ela.
+     *
+     * Regra exclusiva simula contra base limpa: se ela vai descartar o que
+     * veio antes, calcular sobre o saldo ja reduzido daria um valor menor
+     * que o real.
+     *
+     * @return array{allocation:DiscountAllocation,applied:array<int,AppliedDiscount>}
+     */
+    private function simulate(Rule $rule, CartContext $cart, DiscountAllocation $accumulated): array
+    {
+        $baseline = $rule->isExclusive() ? DiscountAllocation::empty() : $accumulated;
+
+        $allocation = DiscountAllocation::empty();
+        $applied = [];
+
+        foreach ($rule->actions as $action) {
+            $scope = $this->buildScope($rule, $action, $cart, $baseline->merge($allocation));
+
+            if ($scope->isEmpty()) {
+                continue;
+            }
+
+            $result = $this->actions->get($action->type)->calculate($action, $cart, $scope);
+
+            if ($result->isEmpty()) {
+                continue;
+            }
+
+            $allocation = $allocation->merge($result);
+
+            $applied[] = new AppliedDiscount(
+                ruleId: $rule->id,
+                ruleName: $rule->name,
+                actionType: $action->type,
+                target: $action->target,
+                amount: $result->total(),
+                couponCode: $rule->couponCode,
+                allocation: $result,
+            );
+        }
+
+        return ['allocation' => $allocation, 'applied' => $applied];
+    }
+
+    /**
+     * Resolve um grupo inteiro pelo maior desconto.
+     *
+     * Simula todas as regras elegiveis do grupo contra a MESMA base e
+     * aplica a que der mais desconto ao cliente. Empate fica com a de
+     * menor prioridade numerica, que ja e a ordem da lista.
+     *
+     * @param  array<int,Rule>  $candidates
+     * @return array{rule:?Rule,simulation:array{allocation:DiscountAllocation,applied:array<int,AppliedDiscount>},rejected:array<int,RejectedRule>}
+     */
+    private function resolveBestOffer(
+        Rule $trigger,
+        array $candidates,
+        CartContext $cart,
+        DateTimeImmutable $now,
+        DiscountAllocation $accumulated,
+    ): array {
+        $winner = null;
+        $winnerSimulation = ['allocation' => DiscountAllocation::empty(), 'applied' => []];
+        $best = Money::zero();
+        $rejected = [];
+        $contenders = [];
+
+        foreach ($candidates as $candidate) {
+            if ($candidate->resolutionGroup !== $trigger->resolutionGroup) {
+                continue;
+            }
+
+            $reason = $this->reasonToSkip($candidate, $cart, $now);
+
+            if ($reason !== null) {
+                $rejected[] = new RejectedRule($candidate->id, $candidate->name, $reason);
+
+                continue;
+            }
+
+            $simulation = $this->simulate($candidate, $cart, $accumulated);
+            $total = $simulation['allocation']->total();
+
+            if (! $total->isPositive()) {
+                $rejected[] = new RejectedRule($candidate->id, $candidate->name, RejectionReason::NoDiscountValue);
+
+                continue;
+            }
+
+            $contenders[] = $candidate;
+
+            if ($total->greaterThan($best)) {
+                $best = $total;
+                $winner = $candidate;
+                $winnerSimulation = $simulation;
+            }
+        }
+
+        foreach ($contenders as $contender) {
+            if ($winner !== null && $contender->id === $winner->id) {
+                continue;
+            }
+
+            $rejected[] = new RejectedRule(
+                $contender->id,
+                $contender->name,
+                RejectionReason::SupersededByBetterOffer,
+            );
+        }
+
+        return ['rule' => $winner, 'simulation' => $winnerSimulation, 'rejected' => $rejected];
     }
 
     /** @return array<int,Rule> candidatas ja ordenadas por prioridade */
@@ -154,9 +292,7 @@ final class DiscountEngine
     /**
      * Monta o recorte sobre o qual a acao vai agir.
      *
-     * Aqui mora a diferenca entre 10%+10% = 20% e 10%+10% = 19%: com base
-     * 'current' o saldo ja concedido e descontado do disponivel; com
-     * 'original' o escopo ignora o que veio antes.
+     * Aqui mora a diferenca entre 10%+10% = 20% e 10%+10% = 19%.
      */
     private function buildScope(
         Rule $rule,
@@ -182,12 +318,7 @@ final class DiscountEngine
         );
     }
 
-    /**
-     * O filtro de componentes so vale para o alvo Components. Nos demais
-     * alvos o desconto incide no item inteiro, como sempre incidiu.
-     *
-     * @return array<int,string>
-     */
+    /** @return array<int,string> */
     private function componentTypes(ActionDefinition $action): array
     {
         if ($action->target !== ActionTarget::Components) {
@@ -202,14 +333,8 @@ final class DiscountEngine
         ));
     }
 
-    /** @param  array<int,string>  $usedExclusivityGroups */
-    private function reasonToSkip(
-        Rule $rule,
-        CartContext $cart,
-        DateTimeImmutable $now,
-        bool $exclusiveApplied,
-        array $usedExclusivityGroups,
-    ): ?RejectionReason {
+    private function reasonToSkip(Rule $rule, CartContext $cart, DateTimeImmutable $now): ?RejectionReason
+    {
         if (! $rule->active) {
             return RejectionReason::Inactive;
         }
@@ -220,14 +345,6 @@ final class DiscountEngine
 
         if ($rule->requiresCoupon() && ($rule->couponCode === null || ! $cart->hasCoupon($rule->couponCode))) {
             return RejectionReason::CouponNotProvided;
-        }
-
-        if ($exclusiveApplied) {
-            return RejectionReason::ExclusivityConflict;
-        }
-
-        if ($rule->exclusivityGroup !== null && in_array($rule->exclusivityGroup, $usedExclusivityGroups, true)) {
-            return RejectionReason::ExclusivityConflict;
         }
 
         if ($this->usage !== null && ! $this->usage->hasRemainingUses($rule, $cart)) {

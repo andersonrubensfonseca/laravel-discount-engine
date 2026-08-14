@@ -29,7 +29,11 @@ return new class extends Migration
             $table->unsignedInteger('priority')->default(100);
 
             $table->string('combination_mode', 20)->default('stackable');
-            $table->string('exclusivity_group', 60)->nullable();
+
+            // Regras do mesmo grupo competem entre si; a estrategia decide
+            // se ganha a primeira por prioridade ou a de maior desconto.
+            $table->string('resolution_group', 60)->nullable();
+            $table->string('resolution_strategy', 30)->default('first_by_priority');
             $table->boolean('stop_further_processing')->default(false);
             $table->string('calculation_base', 20)->default('current');
 

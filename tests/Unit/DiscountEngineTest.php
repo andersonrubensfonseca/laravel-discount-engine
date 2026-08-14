@@ -132,7 +132,7 @@ final class DiscountEngineTest extends TestCase
 
         self::assertSame(1500, $resultado->itemsDiscount()->cents);
         self::assertCount(1, $resultado->applied);
-        self::assertSame(RejectionReason::ExclusivityConflict, $resultado->rejected[0]->reason);
+        self::assertSame(RejectionReason::StoppedByPreviousRule, $resultado->rejected[0]->reason);
     }
 
     public function test_grupo_de_exclusividade_permite_apenas_uma_regra_por_grupo(): void
@@ -308,7 +308,7 @@ final class DiscountEngineTest extends TestCase
             conditions: new ConditionGroup(),
             actions: [new ActionDefinition('free_shipping', 100, ActionTarget::Shipping)],
             priority: $prioridade,
-            exclusivityGroup: $grupo,
+            resolutionGroup: $grupo,
         );
     }
 }

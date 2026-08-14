@@ -10,6 +10,7 @@ use SolutionsTI\DiscountEngine\Core\Enums\CalculationBase;
 use SolutionsTI\DiscountEngine\Core\Enums\CombinationMode;
 use SolutionsTI\DiscountEngine\Core\Enums\LogicOperator;
 use SolutionsTI\DiscountEngine\Core\Enums\Operator;
+use SolutionsTI\DiscountEngine\Core\Enums\ResolutionStrategy;
 use SolutionsTI\DiscountEngine\Core\Enums\TriggerType;
 use SolutionsTI\DiscountEngine\Core\Money\Money;
 use SolutionsTI\DiscountEngine\Core\Rule\ActionDefinition;
@@ -38,7 +39,10 @@ final class RuleHydrator
             couponCode: $couponCode,
             priority: $model->priority,
             combinationMode: CombinationMode::from($model->combination_mode ?? 'stackable'),
-            exclusivityGroup: $model->exclusivity_group,
+            resolutionGroup: $model->resolution_group,
+            resolutionStrategy: ResolutionStrategy::from(
+                $model->resolution_strategy ?? 'first_by_priority',
+            ),
             stopFurtherProcessing: (bool) $model->stop_further_processing,
             calculationBase: CalculationBase::from($model->calculation_base ?? 'current'),
             active: (bool) $model->active,

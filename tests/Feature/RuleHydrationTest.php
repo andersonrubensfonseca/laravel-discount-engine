@@ -168,6 +168,53 @@ final class RuleHydrationTest extends TestCase
         self::assertSame(10000, $resultado->finalTotal()->cents);
     }
 
+    public function test_estrategia_de_resolucao_vem_do_banco(): void
+    {
+        foreach ([['Cinco', 5, 10], ['Vinte', 20, 20]] as [$nome, $percentual, $prioridade]) {
+            DiscountRule::create([
+                'name' => $nome,
+                'trigger' => 'automatic',
+                'priority' => $prioridade,
+                'resolution_group' => 'promocoes',
+                'resolution_strategy' => 'highest_discount',
+                'conditions' => [],
+                'actions' => [['type' => 'percentage', 'value' => $percentual, 'target' => 'cart']],
+            ]);
+        }
+
+        $resultado = $this->manager()->calculate($this->carrinho(10000));
+
+        // Vence a de maior desconto, nao a de menor prioridade.
+        self::assertSame(2000, $resultado->itemsDiscount()->cents);
+        self::assertSame('Vinte', $resultado->applied[0]->ruleName);
+        self::assertSame('superseded_by_better_offer', $resultado->rejected[0]->reason->value);
+    }
+
+    public function test_exclusividade_do_banco_descarta_regra_anterior(): void
+    {
+        DiscountRule::create([
+            'name' => 'Acumulavel 10%',
+            'trigger' => 'automatic',
+            'priority' => 10,
+            'conditions' => [],
+            'actions' => [['type' => 'percentage', 'value' => 10, 'target' => 'cart']],
+        ]);
+
+        DiscountRule::create([
+            'name' => 'Exclusiva 25%',
+            'trigger' => 'automatic',
+            'priority' => 20,
+            'combination_mode' => 'exclusive',
+            'conditions' => [],
+            'actions' => [['type' => 'percentage', 'value' => 25, 'target' => 'cart']],
+        ]);
+
+        $resultado = $this->manager()->calculate($this->carrinho(10000));
+
+        self::assertSame(2500, $resultado->itemsDiscount()->cents);
+        self::assertCount(1, $resultado->applied);
+    }
+
     // ------------------------------------------------------------------
 
     private function manager(): DiscountManager

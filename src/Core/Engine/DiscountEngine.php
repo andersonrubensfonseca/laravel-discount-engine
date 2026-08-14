@@ -315,7 +315,24 @@ final class DiscountEngine
             cart: $cart,
             componentTypes: $this->componentTypes($action),
             alreadyDiscounted: $isCurrent ? $used->byComponent() : [],
+            categoryIds: $this->metaList($action, 'category_ids'),
+            skus: $this->metaList($action, 'skus'),
         );
+    }
+
+    /**
+     * Recorte por item. Vale para qualquer alvo que nao seja frete.
+     *
+     * @return array<int,mixed>
+     */
+    private function metaList(ActionDefinition $action, string $key): array
+    {
+        $value = $action->meta($key, []);
+
+        return array_values(array_filter(
+            is_array($value) ? $value : [$value],
+            static fn ($item): bool => $item !== null && $item !== '',
+        ));
     }
 
     /** @return array<int,string> */

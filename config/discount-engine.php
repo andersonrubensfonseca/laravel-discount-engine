@@ -58,6 +58,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Painel administrativo
+    |--------------------------------------------------------------------------
+    |
+    | ATENCAO: o middleware padrao e apenas 'web' — ou seja, SEM autenticacao.
+    | Isso existe para o painel funcionar de imediato em ambiente local.
+    |
+    | ANTES DE SUBIR PARA PRODUCAO, adicione o middleware de autenticacao e
+    | autorizacao do seu app, por exemplo ['web', 'auth', 'can:gerir-descontos'].
+    | Quem alcanca este painel edita as regras de preco da loja.
+    |
+    */
+
+    'panel' => [
+        'enabled' => env('DISCOUNT_PANEL_ENABLED', true),
+        'prefix' => env('DISCOUNT_PANEL_PREFIX', 'admin/descontos'),
+        'middleware' => ['web'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Condicoes disponiveis
     |--------------------------------------------------------------------------
     | Adicione aqui as condicoes do seu proprio dominio. A classe precisa

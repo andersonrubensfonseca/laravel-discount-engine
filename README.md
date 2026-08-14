@@ -1,5 +1,9 @@
 # laravel-discount-engine
 
+> **Vai cadastrar descontos, nao programar?** O manual de uso esta em
+> [`docs/MANUAL.md`](docs/MANUAL.md) — escrito para o time comercial, com
+> receitas prontas e um roteiro de familiarizacao.
+
 Motor de descontos orientado a regras para carrinhos. Cupons, regras automaticas,
 condicoes compostas e acoes combinaveis — cadastraveis por gente nao tecnica.
 
@@ -469,3 +473,74 @@ As regras compoem. "Primeira estampa a 1,99 E 10% no restante da
 estamparia" sao duas acoes na mesma regra, ou duas regras acumulaveis com
 `calculation_base: current` — a segunda incide sobre o que sobrou da
 primeira.
+
+---
+
+# Painel administrativo
+
+Etapa 1: CRUD completo das regras, com condicoes e acoes em JSON validado.
+O construtor visual e o simulador vem na etapa 2.
+
+## Acesso
+
+```
+/admin/descontos
+```
+
+Prefixo, middleware e ativacao ficam em `config/discount-engine.php`.
+
+## SEGURANCA — leia antes de subir
+
+O middleware padrao e apenas `web`, **sem autenticacao**. Isso existe para o
+painel funcionar de imediato em ambiente local.
+
+```php
+'panel' => [
+    'middleware' => ['web', 'auth', 'can:gerir-descontos'],
+],
+```
+
+Enquanto o middleware for so `web`, o painel exibe um aviso vermelho no topo
+de todas as telas. Quem alcanca essa URL reescreve as regras de preco da loja.
+
+Para desligar o painel por completo:
+
+```
+DISCOUNT_PANEL_ENABLED=false
+```
+
+## Validacao estrutural
+
+O JSON e validado antes de gravar, contra os registries de condicoes e acoes.
+Erro de digitacao vira mensagem no formulario, nao excecao no checkout de um
+cliente real tres dias depois. O validador pega:
+
+- JSON malformado
+- condicao ou acao nao registrada (e lista as disponiveis)
+- operador invalido
+- alvo `components` sem `meta.component_types`
+- `tiered` sem faixas, faixa sem `min` ou sem `percent`/`amount_cents`
+- `component_unit_price` sem `unit_price_cents`
+- percentual acima de 100
+
+## Cupons
+
+Varios codigos por regra, um por linha. Sao normalizados em caixa alta e
+deduplicados.
+
+Codigo removido da lista e apagado — **exceto se ja tiver sido usado**. Nesse
+caso ele e apenas desativado e o painel avisa: apagar a linha quebraria a
+referencia dos usos gravados e o historico do pedido.
+
+A mesma logica vale para a regra: regra com uso registrado nao pode ser
+apagada, so desativada.
+
+## Publicando as views
+
+```bash
+php artisan vendor:publish --tag=discount-engine-views
+```
+
+As views usam Tailwind e Alpine via CDN, para o pacote funcionar em Laravel 8
+e 13 sem exigir build de assets do app hospedeiro. Se o seu projeto ja compila
+Tailwind, publique e troque os `<script>` do layout.

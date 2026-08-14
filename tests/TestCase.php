@@ -33,6 +33,11 @@ abstract class TestCase extends Orchestra
 
     protected function getEnvironmentSetUp($app): void
     {
+        // O middleware 'web' inclui EncryptCookies, que exige APP_KEY.
+        // O Testbench nao define uma; sem isso os testes do painel estouram
+        // com MissingAppKeyException antes de chegar no controller.
+        $app['config']->set('app.key', 'base64:' . base64_encode(random_bytes(32)));
+
         $connection = env('DB_CONNECTION', 'sqlite');
 
         $app['config']->set('database.default', $connection);

@@ -42,18 +42,38 @@ final class DiscountScope
     /**
      * Monta o escopo a partir do carrinho.
      *
-     * @param  array<int,string>  $componentTypes  vazio = todos
-     * @param  array<string,Money>  $alreadyDiscounted  chave "itemId::indice"
+     * Dois niveis de recorte, e a diferenca entre eles importa:
+     *
+     *   categoryIds / skus  escolhem QUAIS ITENS participam
+     *   componentTypes      escolhe QUAIS PARTES do preco participam
+     *
+     * "R$ 1,99 na primeira estampa das camisas" precisa dos dois: recorta
+     * os itens da categoria e, dentro deles, so o componente de estamparia.
+     *
+     * Usar condicao no lugar disso nao funciona — condicao e porteira da
+     * regra inteira, nao recorte. Ela diria "o carrinho tem camisas, aplique",
+     * e o desconto cairia tambem nas estampas de produtos de outra categoria.
+     *
+     * @param  array<int,string>       $componentTypes    vazio = todos
+     * @param  array<string,Money>     $alreadyDiscounted chave "itemId::indice"
+     * @param  array<int,string|int>   $categoryIds       vazio = todos
+     * @param  array<int,string>       $skus              vazio = todos
      */
     public static function forCart(
         CartContext $cart,
         array $componentTypes = [],
         array $alreadyDiscounted = [],
+        array $categoryIds = [],
+        array $skus = [],
     ): self {
         $scoped = [];
 
         foreach ($cart->items as $item) {
             /** @var CartItem $item */
+            if (! self::itemMatches($item, $categoryIds, $skus)) {
+                continue;
+            }
+
             foreach ($item->components as $index => $component) {
                 /** @var PriceComponent $component */
                 if ($componentTypes !== [] && ! in_array($component->type, $componentTypes, true)) {
@@ -76,6 +96,29 @@ final class DiscountScope
         }
 
         return self::of($scoped);
+    }
+
+    /**
+     * @param  array<int,string|int>  $categoryIds
+     * @param  array<int,string>      $skus
+     */
+    private static function itemMatches(CartItem $item, array $categoryIds, array $skus): bool
+    {
+        // Comparacao frouxa de proposito: ID de categoria chega como int do
+        // banco e como string do formulario do painel.
+        if ($categoryIds !== [] && array_uintersect(
+            $item->categoryIds,
+            $categoryIds,
+            static fn ($a, $b): int => (string) $a <=> (string) $b,
+        ) === []) {
+            return false;
+        }
+
+        if ($skus !== [] && ! in_array($item->sku, $skus, false)) {
+            return false;
+        }
+
+        return true;
     }
 
     public function isEmpty(): bool
